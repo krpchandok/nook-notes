@@ -1,0 +1,1 @@
+/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/engine_tests.dir/engine/tests/memtable_test.cpp.o CMakeFiles/engine_tests.dir/engine/tests/sstable_test.cpp.o CMakeFiles/engine_tests.dir/engine/tests/db_test.cpp.o -o engine_tests  libengine.a lib/libgtest_main.a lib/libgtest.a

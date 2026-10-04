@@ -1,0 +1,2 @@
+/usr/bin/ar qc libengine.a CMakeFiles/engine.dir/engine/src/memtable.cpp.o CMakeFiles/engine.dir/engine/src/sstable.cpp.o CMakeFiles/engine.dir/engine/src/compaction.cpp.o CMakeFiles/engine.dir/engine/src/db.cpp.o
+/usr/bin/ranlib libengine.a

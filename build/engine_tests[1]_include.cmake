@@ -1,0 +1,5 @@
+if(EXISTS "/Users/kirby/nook-notes/build/engine_tests[1]_tests.cmake")
+  include("/Users/kirby/nook-notes/build/engine_tests[1]_tests.cmake")
+else()
+  add_test(engine_tests_NOT_BUILT engine_tests_NOT_BUILT)
+endif()

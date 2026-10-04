@@ -1,10 +1,9 @@
+#include "nook/memtable.hpp"
 #include <string>
 #include <optional>
 using namespace std;
-using namespace nook;
-#include "memtable.hpp"
 
-
+namespace nook {
 size_t MemTable::entry_size(const std::string& key, const std::optional<std::string>& value) {
     return key.size() + (value ? value->size() : 0);
 }
@@ -30,9 +29,9 @@ void MemTable::del(const std::string& key) {
 // map doesnt work on const keys so find via iterator
 Lookup MemTable::lookup(const std::string& key) const {
     auto it = entries.find(key);
-    if (it == entries.end()) return Lookup{Lookup::State::Absent, ""};
-    if (!it->second) return Lookup{Lookup::State::Deleted, ""};
-    return Lookup{Lookup::State::Found, *it->second};
+    if (it == entries.end()) return Lookup{State::Absent, ""};
+    if (!it->second) return Lookup{State::Deleted, ""};
+    return Lookup{State::Found, *it->second};
 }
 
 size_t MemTable::get_approx_bytes() const {
@@ -48,3 +47,4 @@ void MemTable::clear() {
 	approx_bytes = 0;
 }
 
+}
