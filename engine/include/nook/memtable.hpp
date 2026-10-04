@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include "lookup.hpp"
+#include "entry.hpp"
 
 namespace nook {
 class MemTable {
@@ -23,5 +24,6 @@ public:
     auto end() const { return entries.cend(); }
 
     static size_t entry_size(const std::string& key, const std::optional<std::string>& value);
+    std::vector<Entry> scan(const std::string& start, const std::string& end) const;
 };
 }

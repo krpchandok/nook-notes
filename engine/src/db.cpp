@@ -3,11 +3,14 @@
 #include <cstdio>
 #include <filesystem>
 #include <optional>
+#include <set>
+#include <map>
 #include <string>
 #include <vector>
 #include "nook/db.hpp"
 #include "nook/compaction.hpp"
 #include "nook/file_util.hpp"
+#include "nook/keys.hpp"
 using namespace std;
 namespace fs = std::filesystem;
 
@@ -37,28 +40,56 @@ DB::DB(const string& dir, Options opts): dir{dir}, opts{std::move(opts)} {
 	maybe_flush();
 }
 
-void DB::load_tables() {
-	vector<uint64_t> numbers;
-	for (const auto& entry : fs::directory_iterator(dir)) {
-		const fs::path& p = entry.path();
-		if (p.extension() == ".tmp") {
-			fs::remove(p);
-			continue;
-		}
-		if (auto n = parse_table_number(p)) numbers.push_back(*n);
-	}
-
-	sort(numbers.begin(), numbers.end());
-	for (uint64_t n : numbers) {
-		sstables.push_back(SSTable::open(table_path(n)));
-		next_file_number = n + 1;
-	}
+string DB::manifest_path() const {
+	return (fs::path(dir) / "MANIFEST").string();
 }
 
 string DB::table_path(uint64_t number) const {
 	char name[32];
 	snprintf(name, sizeof(name), "%06llu.sst", static_cast<unsigned long long>(number));
 	return (fs::path(dir) / name).string();
+}
+
+void DB::load_tables() {
+	optional<Manifest> loaded = Manifest::load(manifest_path());
+
+	if (loaded) {
+		manifest = *loaded;
+	} else {
+		vector<uint64_t> numbers;
+		for (const auto& entry : fs::directory_iterator(dir)) {
+			if (auto n = parse_table_number(entry.path())) numbers.push_back(*n);
+		}
+		sort(numbers.begin(), numbers.end());
+
+		manifest.tables = numbers;
+		manifest.next_file_number = numbers.empty() ? 1 : numbers.back() + 1;
+		manifest.save(manifest_path());
+	}
+
+	for (uint64_t n : manifest.tables) {
+		sstables.push_back(SSTable::open(table_path(n)));
+		manifest.next_file_number = max(manifest.next_file_number, n + 1);
+	}
+
+	remove_orphans();
+}
+
+void DB::remove_orphans() {
+	set<uint64_t> live(manifest.tables.begin(), manifest.tables.end());
+
+	vector<fs::path> doomed;
+	for (const auto& entry : fs::directory_iterator(dir)) {
+		const fs::path& p = entry.path();
+		if (p.extension() == ".tmp") {
+			doomed.push_back(p);
+		} else if (auto n = parse_table_number(p); n && !live.count(*n)) {
+			doomed.push_back(p);
+		}
+	}
+
+	for (const fs::path& p : doomed) fs::remove(p);
+	if (!doomed.empty()) fsync_dir(dir);
 }
 
 void DB::apply(const WalRecord& r) {
@@ -89,10 +120,15 @@ void DB::maybe_flush() {
 void DB::flush() {
 	if (memtable.empty()) return;
 
-	string path = table_path(next_file_number++);
+	uint64_t n = manifest.next_file_number++;
+	string path = table_path(n);
 	SSTable::write(path, memtable);
-	sstables.push_back(SSTable::open(path));
+	SSTable table = SSTable::open(path);
 
+	manifest.tables.push_back(n);
+	manifest.save(manifest_path());
+
+	sstables.push_back(std::move(table));
 	wal->reset();
 	memtable.clear();
 }
@@ -116,21 +152,47 @@ void DB::compact() {
 	if (sstables.empty()) return;
 
 	vector<Entry> merged = merge_tables(sstables, true);
-	string path = table_path(next_file_number++);
+	uint64_t n = manifest.next_file_number++;
+	string path = table_path(n);
 	SSTable::write(path, merged);
+	SSTable table = SSTable::open(path);
 
-	vector<string> old_paths;
-	for (const SSTable& t : sstables) old_paths.push_back(t.path());
+	vector<uint64_t> old_tables = manifest.tables;
+	manifest.tables = {n};
+	manifest.save(manifest_path());
 
 	sstables.clear();
-	sstables.push_back(SSTable::open(path));
+	sstables.push_back(std::move(table));
 
-	for (const string& p : old_paths) fs::remove(p);
+	for (uint64_t old : old_tables) fs::remove(table_path(old));
 	fsync_dir(dir);
 }
 
 size_t DB::num_sstables() const {
 	return sstables.size();
+}
+
+vector<DB::KeyValue> DB::scan(const string& start, const string& end) const {
+	map<string, optional<string>> merged;
+
+	for (const SSTable& t : sstables) {
+		for (Entry& e : t.scan(start, end)) {
+			merged[e.key] = std::move(e.value);
+		}
+	}
+	for (Entry& e : memtable.scan(start, end)) {
+		merged[e.key] = std::move(e.value);
+	}
+
+	vector<KeyValue> out;
+	for (auto& [key, value] : merged) {
+		if (value) out.emplace_back(key, std::move(*value));
+	}
+	return out;
+}
+
+vector<DB::KeyValue> DB::scan_prefix(const string& prefix) const {
+	return scan(prefix, prefix_successor(prefix));
 }
 
 }

@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <iterator>
 #include "nook/sstable.hpp"
 #include "nook/coding.hpp"
 #include "nook/crc32.hpp"
@@ -182,6 +183,34 @@ std::vector<Entry> SSTable::read_all() const {
     size_t pos = 0;
     while (pos < data.size()) entries.push_back(decode_entry(data, pos));
     return entries;
+}
+
+std::vector<Entry> SSTable::scan(const std::string& start, const std::string& end) const {
+    std::vector<Entry> out;
+    if (index_.empty()) return out;
+
+    auto first = std::upper_bound(index_.begin(), index_.end(), start,
+        [](const std::string& k, const IndexEntry& ie) { return k < ie.key; });
+    uint64_t from = (first == index_.begin()) ? 0 : std::prev(first)->offset;
+
+    uint64_t to = data_end_;
+    if (!end.empty()) {
+        auto last = std::lower_bound(index_.begin(), index_.end(), end,
+            [](const IndexEntry& ie, const std::string& k) { return ie.key < k; });
+        if (last != index_.end()) to = last->offset;
+    }
+
+    if (from >= to) return out;
+
+    std::string data = pread_exact(fd_, from, static_cast<size_t>(to - from));
+    size_t pos = 0;
+    while (pos < data.size()) {
+        Entry e = decode_entry(data, pos);
+        if (e.key < start) continue;
+        if (!end.empty() && e.key >= end) break;
+        out.push_back(std::move(e));
+    }
+    return out;
 }
 
 }

@@ -7,6 +7,8 @@
 #include "nook/file_util.hpp"
 #include "nook/memtable.hpp"
 #include "nook/sstable.hpp"
+#include <map>
+#include <random>
 
 namespace fs = std::filesystem;
 using nook::DB;
@@ -303,4 +305,102 @@ TEST_F(DBTest, MergeTablesKeepsTombstonesWhenAsked) {
     ASSERT_EQ(merged.size(), 1u);
     EXPECT_EQ(merged[0].key, "c");
     EXPECT_FALSE(merged[0].value.has_value());
+}
+
+using KV = std::vector<std::pair<std::string, std::string>>;
+
+TEST_F(DBTest, ScanMergesLayersNewestWins) {
+    DB db(dir, tiny());
+    db.put("apple", "1");
+    db.put("cat", "meow");
+    db.put("dog", "woof");
+    fill(db, 10, "x");
+    db.put("cat", "purr");
+    db.del("dog");
+    fill(db, 10, "y");
+    db.put("apple", "2");
+    db.put("eel", "zap");
+
+    EXPECT_EQ(db.scan("a", "f"), (KV{{"apple", "2"}, {"cat", "purr"}, {"eel", "zap"}}));
+}
+
+TEST_F(DBTest, ScanPrefix) {
+    DB db(dir, tiny());
+    db.put("bullet/1", "one");
+    db.put("bullet/2", "two");
+    db.put("bullets", "not a bullet");
+    db.put("bulletin", "also not");
+    db.put("entry/1", "e");
+    db.del("bullet/2");
+
+    EXPECT_EQ(db.scan_prefix("bullet/"), (KV{{"bullet/1", "one"}}));
+    EXPECT_EQ(db.scan_prefix("entry/").size(), 1u);
+    EXPECT_TRUE(db.scan_prefix("fact/").empty());
+}
+
+TEST_F(DBTest, ScanSurvivesRestart) {
+    {
+        DB db(dir, tiny());
+        for (int i = 0; i < 40; ++i) db.put("k" + std::to_string(100 + i), "v");
+        db.del("k110");
+    }
+
+    DB reopened(dir, tiny());
+    auto out = reopened.scan("k100", "k120");
+    EXPECT_EQ(out.size(), 19u);
+    EXPECT_EQ(out.front().first, "k100");
+    EXPECT_EQ(out.back().first, "k119");
+}
+
+TEST_F(DBTest, RandomizedOpsMatchModel) {
+    std::mt19937 rng(12345);
+    std::map<std::string, std::string> model;
+
+    auto key_for = [](int i) {
+        char b[16];
+        snprintf(b, sizeof(b), "k%03d", i);
+        return std::string(b);
+    };
+
+    auto check = [&](DB& db) {
+        EXPECT_EQ(db.scan("", ""), KV(model.begin(), model.end()));
+
+        for (int i = 0; i < 50; ++i) {
+            std::string a = key_for(static_cast<int>(rng() % 200));
+            std::string b = key_for(static_cast<int>(rng() % 200));
+            if (a > b) std::swap(a, b);
+            KV want;
+            for (auto it = model.lower_bound(a); it != model.end() && it->first < b; ++it) want.push_back(*it);
+            EXPECT_EQ(db.scan(a, b), want) << "[" << a << ", " << b << ")";
+        }
+
+        for (int i = 0; i < 200; ++i) {
+            std::string k = key_for(i);
+            auto it = model.find(k);
+            if (it == model.end()) EXPECT_EQ(db.get(k), std::nullopt) << k;
+            else EXPECT_EQ(db.get(k), it->second) << k;
+        }
+    };
+
+    {
+        DB db(dir, tiny());
+        for (int step = 0; step < 1000; ++step) {
+            int op = static_cast<int>(rng() % 100);
+            std::string k = key_for(static_cast<int>(rng() % 200));
+            if (op < 60) {
+                std::string v = "v" + std::to_string(step);
+                db.put(k, v);
+                model[k] = v;
+            } else if (op < 95) {
+                db.del(k);
+                model.erase(k);
+            } else {
+                db.compact();
+            }
+        }
+        check(db);
+    }
+
+    DB reopened(dir, tiny());
+    check(reopened);
 }

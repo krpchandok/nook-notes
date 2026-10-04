@@ -22,6 +22,7 @@ public:
 
     Lookup lookup(const std::string& key) const;
     std::vector<Entry> read_all() const;
+    std::vector<Entry> scan(const std::string& start, const std::string& end) const;
     size_t size() const { return static_cast<size_t>(entry_count_); }
     const std::string& path() const { return path_; }
 

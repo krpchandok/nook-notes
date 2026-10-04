@@ -14,6 +14,7 @@ add_library(engine
     engine/src/wal_record.cpp
     engine/src/wal.cpp
     engine/src/file_util.cpp
+    engine/src/manifest.cpp
 )
 target_include_directories(engine PUBLIC engine/include)
 
@@ -32,6 +33,7 @@ add_executable(engine_tests
     engine/tests/wal_record_test.cpp
     engine/tests/wal_test.cpp
     engine/tests/file_util_test.cpp
+    engine/tests/manifest_test.cpp
 )
 
 target_link_libraries(engine_tests PRIVATE engine GTest::gtest_main)

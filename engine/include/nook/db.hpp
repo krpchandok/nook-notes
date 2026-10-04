@@ -3,8 +3,10 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "nook/options.hpp"
+#include <utility>
+#include "nook/manifest.hpp"
 #include "nook/memtable.hpp"
+#include "nook/options.hpp"
 #include "nook/sstable.hpp"
 #include "nook/wal.hpp"
 
@@ -21,19 +23,25 @@ public:
     void compact();
     size_t num_sstables() const;
 
+    using KeyValue = std::pair<std::string, std::string>;
+    std::vector<KeyValue> scan(const std::string& start, const std::string& end) const;
+    std::vector<KeyValue> scan_prefix(const std::string& prefix) const;
+
 private:
     void apply(const WalRecord& r);
     void maybe_flush();
     void flush();
     void load_tables();
+    void remove_orphans();
     std::string table_path(uint64_t number) const;
+    std::string manifest_path() const;
 
     std::string dir;
     Options opts;
     MemTable memtable;
     std::vector<SSTable> sstables;
     std::optional<Wal> wal;
-    uint64_t next_file_number = 1;
+    Manifest manifest;
 };
 
 }

@@ -1,4 +1,5 @@
 #include "nook/memtable.hpp"
+#include "nook/entry.hpp"
 #include <string>
 #include <optional>
 using namespace std;
@@ -45,6 +46,14 @@ bool MemTable::empty() const {
 void MemTable::clear() {
 	entries.clear();
 	approx_bytes = 0;
+}
+std::vector<Entry> MemTable::scan(const std::string& start, const std::string& end) const {
+    std::vector<Entry> out;
+    for (auto it = entries.lower_bound(start); it != entries.end(); ++it) {
+        if (!end.empty() && it->first >= end) break;
+        out.push_back(Entry{it->first, it->second});
+    }
+    return out;
 }
 
 }
