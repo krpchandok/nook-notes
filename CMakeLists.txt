@@ -25,7 +25,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
 enable_testing()
+include(GoogleTest)
+
 add_executable(engine_tests
     engine/tests/memtable_test.cpp
     engine/tests/sstable_test.cpp
@@ -37,6 +45,4 @@ add_executable(engine_tests
 )
 
 target_link_libraries(engine_tests PRIVATE engine GTest::gtest_main)
-
-include(GoogleTest)
 gtest_discover_tests(engine_tests)
