@@ -1,21 +1,8 @@
 #include "nook/wal_record.hpp"
+#include "nook/coding.hpp"
 #include "nook/crc32.hpp"
 
 namespace nook {
-
-static void put_u32(std::string& out, uint32_t x) {
-    out.push_back(static_cast<char>(x & 0xFF));
-    out.push_back(static_cast<char>((x >> 8) & 0xFF));
-    out.push_back(static_cast<char>((x >> 16) & 0xFF));
-    out.push_back(static_cast<char>((x >> 24) & 0xFF));
-}
-
-static uint32_t get_u32(std::string_view s, size_t pos) {
-    return  static_cast<uint32_t>(static_cast<uint8_t>(s[pos]))
-         | (static_cast<uint32_t>(static_cast<uint8_t>(s[pos + 1])) << 8)
-         | (static_cast<uint32_t>(static_cast<uint8_t>(s[pos + 2])) << 16)
-         | (static_cast<uint32_t>(static_cast<uint8_t>(s[pos + 3])) << 24);
-}
 
 std::string encode_record(const WalRecord& r) {
     std::string body;
@@ -30,7 +17,6 @@ std::string encode_record(const WalRecord& r) {
     out += body;
     return out;
 }
-
 
 std::optional<WalRecord> decode_record(std::string_view data, size_t& offset) {
     if (offset > data.size() || data.size() - offset < kRecordHeaderSize) {
@@ -68,4 +54,4 @@ std::optional<WalRecord> decode_record(std::string_view data, size_t& offset) {
     return r;
 }
 
-}  // namespace nook
+}

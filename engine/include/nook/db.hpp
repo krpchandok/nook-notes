@@ -1,24 +1,18 @@
 #pragma once
-#include <vector>
+#include <cstdint>
+#include <optional>
 #include <string>
-#include "nook/lookup.hpp"
+#include <vector>
+#include "nook/options.hpp"
 #include "nook/memtable.hpp"
 #include "nook/sstable.hpp"
+#include "nook/wal.hpp"
 
 namespace nook {
-struct Options {
-    size_t memtable_bytes = 4 * 1024 * 1024;
-};
 
 class DB {
-    void flush();
-    void maybe_flush();
-
-    Options opts;
-    MemTable memtable;
-    std::vector<SSTable> sstables;   // oldest at the front, newest at the back
 public:
-    explicit DB(Options opts = {});
+    explicit DB(const std::string& dir, Options opts = {});
 
     void put(const std::string& key, const std::string& value);
     void del(const std::string& key);
@@ -26,5 +20,20 @@ public:
 
     void compact();
     size_t num_sstables() const;
+
+private:
+    void apply(const WalRecord& r);
+    void maybe_flush();
+    void flush();
+    void load_tables();
+    std::string table_path(uint64_t number) const;
+
+    std::string dir;
+    Options opts;
+    MemTable memtable;
+    std::vector<SSTable> sstables;
+    std::optional<Wal> wal;
+    uint64_t next_file_number = 1;
 };
+
 }

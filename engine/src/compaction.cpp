@@ -11,10 +11,10 @@ vector<Entry> merge_tables(const vector<SSTable>& tables, bool drop_tombstones) 
 	map<string, optional<string>> merged;
 
 	for (const SSTable& table : tables) {
-		for (const Entry& e : table) {
-			merged[e.key] = e.value;
-		}
-	}
+        for (const Entry& e : table.read_all()) {
+            merged[e.key] = e.value;
+        }
+    }
 
 	vector<Entry> result;
 	result.reserve(merged.size());

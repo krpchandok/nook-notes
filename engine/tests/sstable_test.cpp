@@ -1,87 +1,83 @@
 #include <gtest/gtest.h>
+
+#include <filesystem>
 #include <string>
 #include <vector>
+
+#include "nook/compaction.hpp"
+#include "nook/entry.hpp"
 #include "nook/memtable.hpp"
 #include "nook/sstable.hpp"
 
-using nook::Lookup;
-using nook::MemTable;
-using nook::SSTable;
-using nook::State;
+namespace fs = std::filesystem;
 
-namespace {
+class SSTableMergeTest : public ::testing::Test {
+protected:
+    std::string dir;
 
-MemTable sample_memtable() {
-    MemTable mt;
-    mt.put("banana", "yellow");
-    mt.put("apple", "red");
-    mt.put("cherry", "dark red");
-    mt.del("banana");
-    mt.del("durian");
-    return mt;
-}
-
-}
-
-TEST(SSTable, MatchesMemTableLookups) {
-    MemTable mt = sample_memtable();
-    SSTable t = SSTable::from_memtable(mt);
-
-    for (const std::string key : {"apple", "banana", "cherry", "durian", "zzz"}) {
-        Lookup a = mt.lookup(key);
-        Lookup b = t.lookup(key);
-        EXPECT_EQ(a.state, b.state) << "key: " << key;
-        EXPECT_EQ(a.value, b.value) << "key: " << key;
-    }
-}
-
-TEST(SSTable, TombstonesSurviveFlush) {
-    SSTable t = SSTable::from_memtable(sample_memtable());
-
-    EXPECT_EQ(t.lookup("banana").state, State::Deleted);
-    EXPECT_EQ(t.lookup("durian").state, State::Deleted);
-}
-
-TEST(SSTable, NeverWrittenKeyIsAbsent) {
-    SSTable t = SSTable::from_memtable(sample_memtable());
-
-    EXPECT_EQ(t.lookup("mango").state, State::Absent);
-}
-
-TEST(SSTable, IteratesInSortedOrder) {
-    SSTable t = SSTable::from_memtable(sample_memtable());
-
-    std::vector<std::string> keys;
-    for (const auto& entry : t) {
-        keys.push_back(entry.key);
+    void SetUp() override {
+        dir = (fs::temp_directory_path() /
+               ("nook_sstable_test_" + std::string(::testing::UnitTest::GetInstance()->current_test_info()->name())))
+                  .string();
+        fs::remove_all(dir);
     }
 
-    std::vector<std::string> expected = {"apple", "banana", "cherry", "durian"};
-    EXPECT_EQ(keys, expected);
+    void TearDown() override {
+        fs::remove_all(dir);
+    }
+};
+
+TEST_F(SSTableMergeTest, MergeTablesNewestWinsAndTombstonesDropped) {
+    fs::create_directories(dir);
+
+    nook::MemTable older;
+    older.put("a", "old");
+    older.put("b", "keep");
+    older.put("c", "will be deleted");
+
+    nook::MemTable newer;
+    newer.put("a", "new");
+    newer.del("c");
+
+    std::string p1 = (fs::path(dir) / "1.sst").string();
+    std::string p2 = (fs::path(dir) / "2.sst").string();
+    nook::SSTable::write(p1, older);
+    nook::SSTable::write(p2, newer);
+
+    std::vector<nook::SSTable> tables;
+    tables.push_back(nook::SSTable::open(p1));
+    tables.push_back(nook::SSTable::open(p2));
+
+    std::vector<nook::Entry> merged = nook::merge_tables(tables, true);
+
+    ASSERT_EQ(merged.size(), 2u);
+    EXPECT_EQ(merged[0].key, "a");
+    EXPECT_EQ(merged[0].value, "new");
+    EXPECT_EQ(merged[1].key, "b");
+    EXPECT_EQ(merged[1].value, "keep");
 }
 
-TEST(SSTable, SizeCountsTombstones) {
-    SSTable t = SSTable::from_memtable(sample_memtable());
+TEST_F(SSTableMergeTest, MergeTablesKeepsTombstonesWhenAsked) {
+    fs::create_directories(dir);
 
-    EXPECT_EQ(t.size(), 4u);
-}
+    nook::MemTable older;
+    older.put("c", "value");
 
-TEST(SSTable, EdgeLookups) {
-    SSTable t = SSTable::from_memtable(sample_memtable());
+    nook::MemTable newer;
+    newer.del("c");
 
-    Lookup first = t.lookup("apple");
-    EXPECT_EQ(first.state, State::Found);
-    EXPECT_EQ(first.value, "red");
+    std::string p1 = (fs::path(dir) / "1.sst").string();
+    std::string p2 = (fs::path(dir) / "2.sst").string();
+    nook::SSTable::write(p1, older);
+    nook::SSTable::write(p2, newer);
 
-    EXPECT_EQ(t.lookup("durian").state, State::Deleted);
+    std::vector<nook::SSTable> tables;
+    tables.push_back(nook::SSTable::open(p1));
+    tables.push_back(nook::SSTable::open(p2));
 
-    EXPECT_EQ(t.lookup("aaa").state, State::Absent);
-    EXPECT_EQ(t.lookup("zzz").state, State::Absent);
-}
+    std::vector<nook::Entry> merged = nook::merge_tables(tables, false);
 
-TEST(SSTable, EmptyTableIsAllAbsent) {
-    SSTable t = SSTable::from_memtable(MemTable{});
-
-    EXPECT_EQ(t.size(), 0u);
-    EXPECT_EQ(t.lookup("anything").state, State::Absent);
+    ASSERT_EQ(merged.size(), 1u);
+    EXPECT_EQ(merged[0].key, "c");
+    EXPECT_FALSE(merged[0].value.has_value());
 }

@@ -1,24 +1,43 @@
 #pragma once
+#include <cstdint>
 #include <string>
-#include <optional>
 #include <vector>
+#include "nook/entry.hpp"
 #include "nook/lookup.hpp"
 #include "nook/memtable.hpp"
-#include "nook/entry.hpp"
 
 namespace nook {
 
 class SSTable {
-    std::vector<Entry> entries;
 public:
-    explicit SSTable(std::vector<Entry> entries);
+    static void write(const std::string& path, const std::vector<Entry>& entries);
+    static void write(const std::string& path, const MemTable& mt);
+    static SSTable open(const std::string& path);
 
-    static SSTable from_memtable(const MemTable& mt);
+    ~SSTable();
+    SSTable(const SSTable&) = delete;
+    SSTable& operator=(const SSTable&) = delete;
+    SSTable(SSTable&& other) noexcept;
+    SSTable& operator=(SSTable&& other) noexcept;
 
     Lookup lookup(const std::string& key) const;
-    size_t size() const;
+    std::vector<Entry> read_all() const;
+    size_t size() const { return static_cast<size_t>(entry_count_); }
+    const std::string& path() const { return path_; }
 
-    auto begin() const { return entries.begin(); }
-    auto end() const { return entries.end(); }
+private:
+    struct IndexEntry {
+        std::string key;
+        uint64_t offset;
+    };
+
+    SSTable() = default;
+
+    std::string path_;
+    int fd_ = -1;
+    uint64_t data_end_ = 0;
+    uint64_t entry_count_ = 0;
+    std::vector<IndexEntry> index_;
 };
+
 }
